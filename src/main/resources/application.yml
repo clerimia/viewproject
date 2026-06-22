@@ -20,9 +20,12 @@ spring:
         options:
           model: ${OLLAMA_MODEL:qwen2.5:3b}
   datasource:
-    url: jdbc:mysql://${MYSQL_HOST:localhost}:3306/ai_cust?useSSL=false&serverTimezone=UTC
+    url: jdbc:mysql://${MYSQL_HOST:localhost}:3306/ai_cust?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
     username: ${MYSQL_USER:root}
     password: ${MYSQL_PASSWORD:}
+  jpa:
+    hibernate:
+      ddl-auto: update
 
 # ============================================================
 # 语音服务配置

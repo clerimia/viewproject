@@ -34,3 +34,27 @@ build/
 
 ### VS Code ###
 .vscode/
+
+### Frontend ###
+frontend/node_modules/
+frontend/dist/
+frontend/tsconfig.tsbuildinfo
+
+### Build artifacts (generated during docker build) ###
+src/main/resources/static/assets/
+src/main/resources/static/*.html
+src/main/resources/static/*.ico
+src/main/resources/static/*.css
+src/main/resources/static/*.js
+src/main/resources/static/*.json
+
+### OS files ###
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.ico
+
+### Logs ###
+*.log
+logs/

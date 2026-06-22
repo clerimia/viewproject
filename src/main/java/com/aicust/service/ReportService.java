@@ -217,10 +217,12 @@ public class ReportService {
             if (dayLogs.isEmpty()) continue;
 
             int totalScore = 0;
+            long ratedCount = 0;
             long posCount = 0;
             for (InteractionLog log : dayLogs) {
                 if (log.getSatisfaction() != null) {
                     totalScore += log.getSatisfaction();
+                    ratedCount++;
                 }
                 if (log.getSentimentLabel() != null && "POSITIVE".equals(log.getSentimentLabel())) {
                     posCount++;
@@ -229,7 +231,7 @@ public class ReportService {
 
             result.add(SatisfactionTrendPoint.builder()
                     .date(day.format(DATE_FMT))
-                    .avgScore(totalScore > 0 ? (double) totalScore / dayLogs.size() : 0.0)
+                    .avgScore(ratedCount > 0 ? (double) totalScore / ratedCount : 0.0)
                     .totalCount(dayLogs.size())
                     .positiveRatio(posCount / (double) dayLogs.size())
                     .build());
@@ -251,10 +253,12 @@ public class ReportService {
             if (dayLogs.isEmpty()) continue;
 
             int totalScore = 0;
+            long ratedCount = 0;
             long posCount = 0;
             for (InteractionLog log : dayLogs) {
                 if (log.getSatisfaction() != null) {
                     totalScore += log.getSatisfaction();
+                    ratedCount++;
                 }
                 if (log.getSentimentLabel() != null && "POSITIVE".equals(log.getSentimentLabel())) {
                     posCount++;
@@ -263,7 +267,7 @@ public class ReportService {
 
             result.add(Map.<String, Object>of(
                     "date", day.format(DATE_FMT),
-                    "avgScore", totalScore > 0 ? Math.round((double) totalScore / dayLogs.size() * 100.0) / 100.0 : 0.0,
+                    "avgScore", ratedCount > 0 ? Math.round((double) totalScore / ratedCount * 100.0) / 100.0 : 0.0,
                     "totalCount", dayLogs.size(),
                     "positiveRatio", Math.round(posCount / (double) dayLogs.size() * 1000.0) / 1000.0
             ));

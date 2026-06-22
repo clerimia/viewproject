@@ -37,6 +37,13 @@ public interface InteractionLogRepository extends JpaRepository<InteractionLog, 
     @Query("UPDATE InteractionLog i SET i.satisfaction = :score WHERE i.id = :id")
     int updateSatisfaction(@Param("id") Long id, @Param("score") Integer score);
 
+    /** 游客只能更新自己的交互日志满意度 */
+    @Modifying
+    @Query("UPDATE InteractionLog i SET i.satisfaction = :score WHERE i.id = :id AND i.userId = :userId")
+    int updateSatisfactionByIdAndUserId(@Param("id") Long id,
+                                        @Param("userId") Long userId,
+                                        @Param("score") Integer score);
+
     /** 用户当日对话次数 */
     long countByUserIdAndCreatedAtBetween(Long userId, LocalDateTime start, LocalDateTime end);
 

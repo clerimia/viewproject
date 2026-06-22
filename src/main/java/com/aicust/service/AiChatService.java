@@ -1,7 +1,9 @@
 package com.aicust.service;
 
 import com.aicust.model.AiPlan;
+import com.aicust.model.InteractionLog;
 import com.aicust.service.SentimentAnalysisService.AnalysisResult;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
@@ -9,11 +11,13 @@ import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
+import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -33,6 +37,7 @@ public class AiChatService {
     private final RagSearchService ragSearchService;
     private final InteractionLogWriter logWriter;
     private final SentimentAnalysisService sentimentService;
+    private final ObjectMapper objectMapper;
 
     /** RAG 检索默认 topK */
     private static final int RAG_TOPK = 5;
@@ -40,7 +45,8 @@ public class AiChatService {
     public AiChatService(ChatClient chatClient, TokenEstimator estimator, TokenQuotaService quotaService,
                          PlanService planService, SensitiveWordService sensitiveService,
                          ChatMemoryService memoryService, RagSearchService ragSearchService,
-                         InteractionLogWriter logWriter, SentimentAnalysisService sentimentService) {
+                         InteractionLogWriter logWriter, SentimentAnalysisService sentimentService,
+                         ObjectMapper objectMapper) {
         this.chatClient = chatClient;
         this.estimator = estimator;
         this.quotaService = quotaService;
@@ -50,6 +56,7 @@ public class AiChatService {
         this.ragSearchService = ragSearchService;
         this.logWriter = logWriter;
         this.sentimentService = sentimentService;
+        this.objectMapper = objectMapper;
     }
 
     /**
@@ -59,10 +66,13 @@ public class AiChatService {
      * @param prompt 用户问题
      * @param mode   兴趣模式（"history"/"nature"/"food"/null），用于 RAG 分类过滤
      */
-    public Flux<String> streamChat(Long userId, String prompt, String mode) {
+    public Flux<ServerSentEvent<String>> streamChat(Long userId, String prompt, String mode) {
 
         if (sensitiveService.hasSensitiveWord(prompt)) {
-            return Flux.just("Your prompt contains sensitive content. Request denied.");
+            return Flux.just(ServerSentEvent.<String>builder()
+                    .event("message")
+                    .data("Your prompt contains sensitive content. Request denied.")
+                    .build());
         }
 
         long startTime = System.currentTimeMillis();
@@ -93,11 +103,28 @@ public class AiChatService {
         AiPlan plan = planService.getPlan(userId);
         quotaService.check(userId, plan.getDailyTokenLimit(), estimated);
 
+        InteractionLog pendingLog = logWriter.createPending(userId, usernameRef.get(), prompt, mode);
+        Long interactionLogId = pendingLog.getId();
+
         memoryService.addMessage(userId, new UserMessage(prompt));
 
         AtomicInteger actualLength = new AtomicInteger(0);
 
-        return chatClient.prompt()
+        Flux<ServerSentEvent<String>> metaEvent = Flux.just(
+                ServerSentEvent.<String>builder()
+                        .event("meta")
+                        .data(toJson(Map.of("interactionLogId", interactionLogId)))
+                        .build()
+        );
+
+        Flux<ServerSentEvent<String>> referencesEvent = Flux.just(
+                ServerSentEvent.<String>builder()
+                        .event("references")
+                        .data(toReferencesJson(ragHits))
+                        .build()
+        );
+
+        Flux<ServerSentEvent<String>> answerEvents = chatClient.prompt()
                 .messages(messages)
                 .stream()
                 .content()
@@ -115,20 +142,26 @@ public class AiChatService {
                     quotaService.settle(userId, estimated, actual);
                     memoryService.addMessage(userId, new AssistantMessage(answer));
 
-                    // 异步写入交互日志 + 情感分析
-                    saveInteractionLog(userId, usernameRef.get(), prompt, answer, mode,
+                    // 异步补全交互日志 + 情感分析
+                    saveInteractionLog(interactionLogId, userId, usernameRef.get(), prompt, answer, mode,
                             estimated, actual, duration);
                 })
                 .doOnError(e -> {
                     quotaService.rollback(userId, estimated);
                     log.error("Chat error for userId={}: {}", userId, e.getMessage());
-                });
+                })
+                .map(chunk -> ServerSentEvent.<String>builder()
+                        .event("message")
+                        .data(chunk == null ? "" : chunk)
+                        .build());
+
+        return Flux.concat(metaEvent, referencesEvent, answerEvents);
     }
 
     /**
      * 异步保存交互日志并进行情感分析。
      */
-    private void saveInteractionLog(Long userId, String username, String question,
+    private void saveInteractionLog(Long logId, Long userId, String username, String question,
                                     String answer, String mode,
                                     int estimatedTokens, int actualTokens,
                                     long durationMs) {
@@ -143,7 +176,7 @@ public class AiChatService {
                     .reduce((a, b) -> a + "," + b)
                     .orElse("");
 
-            logWriter.logInteraction(userId, username, question, answer, mode,
+            logWriter.completeInteraction(logId, answer,
                     estimatedTokens, actualTokens, durationMs,
                     sentiment.score(), sentiment.label(), focusStr);
 
@@ -154,16 +187,58 @@ public class AiChatService {
 
     // ==================== 私有方法 ====================
 
+    private String toJson(Object value) {
+        try {
+            return objectMapper.writeValueAsString(value);
+        } catch (Exception e) {
+            log.warn("Failed to serialize SSE payload: {}", e.getMessage());
+            return "{}";
+        }
+    }
+
+    private String toReferencesJson(List<RagSearchService.SearchHit> hits) {
+        try {
+            List<Map<String, Object>> refs = new ArrayList<>();
+            for (int i = 0; i < hits.size(); i++) {
+                RagSearchService.SearchHit hit = hits.get(i);
+                Map<String, Object> ref = new LinkedHashMap<>();
+                ref.put("id", i + 1);
+                ref.put("chunkId", safeText(hit.chunkId(), 80));
+                ref.put("title", safeText(hit.title(), 120));
+                ref.put("category", safeText(hit.category(), 40));
+                ref.put("score", Math.round(hit.fusedScore() * 100.0) / 100.0);
+                ref.put("snippet", safeText(hit.text(), 260));
+                refs.add(ref);
+            }
+            return objectMapper.writeValueAsString(refs);
+        } catch (Exception e) {
+            log.warn("Failed to serialize RAG references: {}", e.getMessage());
+            return "[]";
+        }
+    }
+
+    private String safeText(String value, int maxLen) {
+        if (value == null) {
+            return "";
+        }
+        String normalized = value.replaceAll("[\\r\\n]+", " ").trim();
+        return normalized.length() <= maxLen ? normalized : normalized.substring(0, maxLen) + "...";
+    }
+
     /**
      * 构建带 RAG 检索结果的 system prompt。
      * <p>有检索结果时要求 LLM 严格基于参考资料回答；无结果时降级为通用回答。
      */
     private String buildSystemPrompt(List<RagSearchService.SearchHit> hits, String category) {
+        // 关键要求：禁止输出任何 Markdown 符号，否则 TTS 会读出来
+        String noFormat = "\n重要：回答时不要使用任何格式符号，如 # * - > [ ] { } | 等，也不要使用 Markdown 语法。只需输出纯文本的自然语言，方便语音朗读。";
+
         if (hits.isEmpty()) {
             String catHint = category != null ? "关于" + category + "方面的" : "";
             return "你是一个景区智能助手。"
                     + "请尽力回答游客的" + catHint + "问题。"
-                    + "如果遇到不确定的信息，请如实告知游客并建议其咨询景区工作人员。";
+                    + "如果遇到不确定的信息，请如实告知游客并建议其咨询景���工作人员。"
+                    + noFormat;
         }
 
         String catHint = category != null ? "（" + category + "）" : "";
@@ -175,15 +250,15 @@ public class AiChatService {
 
         for (int i = 0; i < hits.size(); i++) {
             RagSearchService.SearchHit hit = hits.get(i);
-            sb.append("[").append(i + 1).append("]");
+            sb.append("参考").append(i + 1).append("：");
             if (!hit.title().isBlank()) {
-                sb.append(" 《").append(hit.title()).append("》");
+                sb.append(hit.title()).append(" - ");
             }
-            sb.append("（相关度: ").append(String.format("%.2f", hit.fusedScore())).append("）\n");
             sb.append(hit.text()).append("\n\n");
         }
         sb.append("=== 参考资料结束 ===\n\n");
-        sb.append("请用自然、亲切的语气回答游客，并在回答中适当引用参考资料的编号（如[1][2]）以增加可信度。");
+        sb.append("请用自然、亲切的语气回答游客。");
+        sb.append(noFormat);
 
         return sb.toString();
     }

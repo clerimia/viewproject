@@ -23,6 +23,10 @@ public class SpeechService {
     private static final String DEFAULT_VOICE = "zh-CN-XiaoxiaoNeural";
     /** 默认语速 */
     private static final String DEFAULT_RATE = "+0%";
+    /** 默认音调 */
+    private static final String DEFAULT_PITCH = "+0Hz";
+    /** 默认音量 */
+    private static final String DEFAULT_VOLUME = "+0%";
     /** 执行超时（秒） */
     private static final long TIMEOUT_SECONDS = 30;
 
@@ -30,7 +34,7 @@ public class SpeechService {
      * 使用默认发音人和语速合成语音。
      */
     public byte[] synthesize(String text) {
-        return synthesize(text, DEFAULT_VOICE, DEFAULT_RATE);
+        return synthesize(text, DEFAULT_VOICE, DEFAULT_RATE, DEFAULT_PITCH, DEFAULT_VOLUME);
     }
 
     /**
@@ -42,6 +46,10 @@ public class SpeechService {
      * @return MP3 音频字节数组
      */
     public byte[] synthesize(String text, String voice, String rate) {
+        return synthesize(text, voice, rate, DEFAULT_PITCH, DEFAULT_VOLUME);
+    }
+
+    public byte[] synthesize(String text, String voice, String rate, String pitch, String volume) {
         if (text == null || text.isBlank()) {
             throw new IllegalArgumentException("text must not be blank");
         }
@@ -50,6 +58,12 @@ public class SpeechService {
         }
         if (rate == null || rate.isBlank()) {
             rate = DEFAULT_RATE;
+        }
+        if (pitch == null || pitch.isBlank()) {
+            pitch = DEFAULT_PITCH;
+        }
+        if (volume == null || volume.isBlank()) {
+            volume = DEFAULT_VOLUME;
         }
 
         Path tempFile = null;
@@ -61,6 +75,8 @@ public class SpeechService {
                     "--text", text,
                     "--voice", voice,
                     "--rate", rate,
+                    "--pitch", pitch,
+                    "--volume", volume,
                     "--write-media", tempFile.toString()
             );
             log.debug("Running edge-tts: {}", String.join(" ", command));

@@ -31,7 +31,9 @@ public class SpeechController {
     public ResponseEntity<byte[]> synthesize(@RequestBody SpeechRequest req) {
         String voice = req.getVoice() != null ? req.getVoice() : "zh-CN-XiaoxiaoNeural";
         String rate = req.getRate() != null ? req.getRate() : "+0%";
-        byte[] audio = speechService.synthesize(req.getText(), voice, rate);
+        String pitch = req.getPitch() != null ? req.getPitch() : "+0Hz";
+        String volume = req.getVolume() != null ? req.getVolume() : "+0%";
+        byte[] audio = speechService.synthesize(req.getText(), voice, rate, pitch, volume);
         return ResponseEntity.ok()
                 .header("Content-Type", "audio/mpeg")
                 .body(audio);

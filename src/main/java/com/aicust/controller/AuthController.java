@@ -82,27 +82,56 @@ public class AuthController {
         String password = body.get("password");
         String code = body.get("code");
         String uuid = body.get("uuid");
+        String loginRole = body.getOrDefault("loginRole", "USER");
+
+        if (uuid == null || uuid.isBlank()) {
+            return Map.of("success", false, "message", "缺少验证码UUID，请刷新验证码");
+        }
 
         String cachedCode = redisTemplate.opsForValue().get("captcha:" + uuid);
-        if (cachedCode == null || !cachedCode.equalsIgnoreCase(code)) {
-            throw new RuntimeException("验证码错误或已失效");
+        if (cachedCode == null) {
+            return Map.of("success", false, "message", "验证码已过期，请刷新验证码");
+        }
+        if (!cachedCode.equalsIgnoreCase(code)) {
+            return Map.of("success", false, "message", "验证码错误");
         }
 
-        User user = userRepository.findByUsername(username)
-                .orElseThrow(() -> new RuntimeException("用户不存在"));
+        User user = userRepository.findByUsername(username).orElse(null);
+        if (user == null) {
+            return Map.of("success", false, "message", "用户不存在，请先注册");
+        }
 
         if (!passwordEncoder.matches(password, user.getPassword())) {
-            throw new RuntimeException("密码错误");
+            return Map.of("success", false, "message", "密码错误");
         }
 
-        String token = jwtUtil.generateToken(user.getId(), user.getUsername(), user.getRole());
-        return Map.of("token", token, "userId", user.getId());
+        String userRole = user.getRole() == null ? "USER" : user.getRole();
+        if ("ADMIN".equalsIgnoreCase(loginRole) && !"ADMIN".equalsIgnoreCase(userRole)) {
+            return Map.of("success", false, "message", "该账号不是管理员，不能进入管理端");
+        }
+        if ("USER".equalsIgnoreCase(loginRole) && "ADMIN".equalsIgnoreCase(userRole)) {
+            return Map.of("success", false, "message", "管理员账号请从管理端登录，不能进入游客端");
+        }
+
+        // 验证成功后删除已使用的验证码
+        redisTemplate.delete("captcha:" + uuid);
+
+        String token = jwtUtil.generateToken(user.getId(), user.getUsername(), userRole);
+        return Map.of("success", true, "token", token, "userId", user.getId(), "role", userRole);
     }
 
     @PostMapping("/register")
-    public String register(@RequestBody User user) {
+    public Map<String, Object> register(@RequestBody User user) {
+        if (user.getUsername() == null || user.getUsername().isBlank()) {
+            return Map.of("success", false, "message", "用户名不能为空");
+        }
+        if (userRepository.findByUsername(user.getUsername()).isPresent()) {
+            return Map.of("success", false, "message", "用户名已存在");
+        }
         user.setPassword(passwordEncoder.encode(user.getPassword()));
+        // 公开注册入口只允许创建游客账号，管理员账号必须由系统初始化或数据库侧创建。
+        user.setRole("USER");
         userRepository.save(user);
-        return "注册成功";
+        return Map.of("success", true, "message", "注册成功");
     }
 }

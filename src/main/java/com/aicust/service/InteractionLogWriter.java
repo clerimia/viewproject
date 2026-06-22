@@ -42,6 +42,44 @@ public class InteractionLogWriter {
     }
 
     /**
+     * 创建待完成的交互日志，并立即返回日志 ID，便于前端后续提交满意度评价。
+     */
+    public InteractionLog createPending(Long userId, String username, String question, String mode) {
+        InteractionLog interactionLog = new InteractionLog();
+        interactionLog.setUserId(userId);
+        interactionLog.setUsername(username);
+        interactionLog.setQuestion(question);
+        interactionLog.setMode(mode);
+        interactionLog.setCreatedAt(LocalDateTime.now());
+        return logRepository.save(interactionLog);
+    }
+
+    /**
+     * 对已创建的交互日志补全回答、token、耗时、情感和关注点信息。
+     */
+    @Async("taskExecutor")
+    public void completeInteraction(Long logId, String answer,
+                                    Integer estimatedTokens, Integer actualTokens,
+                                    Long durationMs,
+                                    Double sentimentScore, String sentimentLabel,
+                                    String focusPoints) {
+        try {
+            logRepository.findById(logId).ifPresent(interactionLog -> {
+                interactionLog.setAnswer(answer);
+                interactionLog.setEstimatedTokens(estimatedTokens);
+                interactionLog.setActualTokens(actualTokens);
+                interactionLog.setDurationMs(durationMs);
+                interactionLog.setSentimentScore(sentimentScore);
+                interactionLog.setSentimentLabel(sentimentLabel);
+                interactionLog.setFocusPoints(focusPoints);
+                logRepository.save(interactionLog);
+            });
+        } catch (Exception e) {
+            log.error("Failed to complete InteractionLog: id={}", logId, e);
+        }
+    }
+
+    /**
      * 便捷工厂方法 — 在对话完成后调用。
      */
     @Async("taskExecutor")

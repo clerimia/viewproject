@@ -75,7 +75,7 @@ class LiveChatSmokeTest {
         doNothing().when(quotaService).settle(any(Long.class), anyInt(), anyInt());
         doNothing().when(quotaService).rollback(any(Long.class), anyInt());
 
-        String token = jwtUtil.generateToken(1L, "smoke-user");
+        String token = jwtUtil.generateToken(1L, "smoke-user", "USER");
         HttpHeaders headers = new HttpHeaders();
         headers.setBearerAuth(token);
         headers.setContentType(MediaType.APPLICATION_JSON);

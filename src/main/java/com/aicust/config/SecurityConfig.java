@@ -33,7 +33,9 @@ public class SecurityConfig {
                         .dispatcherTypeMatchers(DispatcherType.ASYNC).permitAll()
                         .requestMatchers(
                                 "/", "/index.html", "/favicon.ico",
-                                "/admin.html",
+                                "/admin.html", "/dashboard.html",
+                                "/login", "/register", "/admin", "/dashboard",
+                                "/assets/**",
                                 "/static/**", "/css/**", "/js/**", "/images/**",
                                 "/api/auth/**",
                                 "/api/digital-human/active",

@@ -1,10 +1,18 @@
-# ===== Stage 1: 编译 =====
+# ===== Stage 0: 前端构建 =====
+FROM node:20-alpine AS frontend
+WORKDIR /app/frontend
+COPY frontend/package*.json ./
+RUN npm ci
+COPY frontend/ ./
+RUN npm run build
+
+# ===== Stage 1: 后端编译 =====
 FROM maven:3.9-eclipse-temurin-21-alpine AS builder
 WORKDIR /build
 
-RUN mkdir -p /root/.m2 && echo '<settings><mirrors><mirror><id>aliyun</id><url>https://maven.aliyun.com/repository/public</url><mirrorOf>central</mirrorOf></mirror></mirrors></settings>' > /root/.m2/settings.xml
-
 COPY . .
+# 将前端构建产物复制到 Maven 资源目录
+COPY --from=frontend /app/frontend/dist/ src/main/resources/static/
 RUN --mount=type=cache,target=/root/.m2 mvn package -DskipTests -B -q
 
 # ===== Stage 2: 运行 =====

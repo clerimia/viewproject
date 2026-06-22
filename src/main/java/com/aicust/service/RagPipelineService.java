@@ -11,6 +11,7 @@ import org.springframework.util.MultiValueMap;
 import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestTemplate;
 
+import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
@@ -167,15 +168,35 @@ public class RagPipelineService {
     }
 
     /**
-     * 删除文档（桩方法）。
-     * TODO: RAG 服务支持文档管理 API 后对接 DELETE /api/documents/{id}
+     * 删除文档。优先调用 RAG 文档删除接口；若 RAG 服务暂不支持，调用方可降级为本地软删除。
      */
+    @SuppressWarnings("unchecked")
     public Map<String, Object> deleteDocument(String documentId) {
-        log.info("[RAG-Pipeline] deleteDocument stub called (id='{}')", documentId);
-        return Map.of(
-                "success", false,
-                "message", "RAG 服务暂不支持删除，待后续对接"
-        );
+        if (documentId == null || documentId.isBlank()) {
+            return Map.of("success", false, "message", "documentId 不能为空");
+        }
+
+        try {
+            HttpEntity<Void> entity = new HttpEntity<>(authHeaders());
+            ResponseEntity<Map> response = restTemplate.exchange(
+                    ragBaseUrl + "/api/documents/" + encode(documentId),
+                    HttpMethod.DELETE,
+                    entity,
+                    Map.class
+            );
+            Map<String, Object> result = response.getBody() == null
+                    ? new LinkedHashMap<>()
+                    : new LinkedHashMap<>(response.getBody());
+            result.putIfAbsent("success", response.getStatusCode().is2xxSuccessful());
+            result.putIfAbsent("message", "RAG 文档删除请求已发送");
+            return result;
+        } catch (RestClientException e) {
+            log.warn("[RAG-Pipeline] deleteDocument failed: {}", e.getMessage());
+            return Map.of("success", false, "message", "RAG 删除接口不可用: " + e.getMessage());
+        } catch (Exception e) {
+            log.error("[RAG-Pipeline] deleteDocument unexpected error: {}", e.getMessage(), e);
+            return Map.of("success", false, "message", "删除失败: " + e.getMessage());
+        }
     }
 
     // ==================== 私有方法 ====================
@@ -192,6 +213,6 @@ public class RagPipelineService {
     }
 
     private String encode(String value) {
-        return value != null ? value : "";
+        return value != null ? URLEncoder.encode(value, StandardCharsets.UTF_8) : "";
     }
 }

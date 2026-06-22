@@ -12,4 +12,10 @@ public class SpeechRequest {
 
     /** 语速，如 "+0%", "-10%", "+20%" */
     private String rate;
+
+    /** 音调，如 "+0Hz", "+20Hz", "-10Hz" */
+    private String pitch;
+
+    /** 音量，如 "+0%", "+20%", "-10%" */
+    private String volume;
 }

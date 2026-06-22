@@ -1,6 +1,6 @@
 package com.aicust.controller;
 
-import com.aicust.service.RagPipelineService;
+import com.aicust.service.KnowledgeDocumentService;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
@@ -13,10 +13,10 @@ import java.util.Map;
 @PreAuthorize("hasRole('ADMIN')")
 public class AdminKnowledgeController {
 
-    private final RagPipelineService pipelineService;
+    private final KnowledgeDocumentService knowledgeDocumentService;
 
-    public AdminKnowledgeController(RagPipelineService pipelineService) {
-        this.pipelineService = pipelineService;
+    public AdminKnowledgeController(KnowledgeDocumentService knowledgeDocumentService) {
+        this.knowledgeDocumentService = knowledgeDocumentService;
     }
 
     /** 文件上传（转发到 RAG /api/pipeline/upload） */
@@ -38,7 +38,7 @@ public class AdminKnowledgeController {
             if (title == null || title.isBlank()) {
                 title = file.getOriginalFilename();
             }
-            return pipelineService.uploadFile(file.getBytes(), file.getOriginalFilename(),
+            return knowledgeDocumentService.uploadFile(file.getBytes(), file.getOriginalFilename(),
                     title, category, sourceId);
         } catch (IOException e) {
             return Map.of("success", false, "message", "读取文件失败: " + e.getMessage());
@@ -59,7 +59,7 @@ public class AdminKnowledgeController {
             return Map.of("success", false, "message", "text 不能为空");
         }
 
-        return pipelineService.ingestText(text, title, category, sourceId, chunkSize, chunkOverlap);
+        return knowledgeDocumentService.ingestText(text, title, category, sourceId, chunkSize, chunkOverlap);
     }
 
     /**
@@ -71,7 +71,7 @@ public class AdminKnowledgeController {
             @RequestParam(value = "keyword", required = false) String keyword,
             @RequestParam(value = "page", defaultValue = "0") int page,
             @RequestParam(value = "size", defaultValue = "20") int size) {
-        return pipelineService.listDocuments(keyword, page, size);
+        return knowledgeDocumentService.listDocuments(keyword, page, size);
     }
 
     /**
@@ -79,7 +79,7 @@ public class AdminKnowledgeController {
      * TODO: RAG 服务支持文档管理 API 后对接
      */
     @DeleteMapping("/documents/{id}")
-    public Map<String, Object> deleteDocument(@PathVariable String id) {
-        return pipelineService.deleteDocument(id);
+    public Map<String, Object> deleteDocument(@PathVariable Long id) {
+        return knowledgeDocumentService.deleteDocument(id);
     }
 }
