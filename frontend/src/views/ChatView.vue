@@ -76,6 +76,13 @@ function finalAnswerOnly(content: string) {
   return (content || '')
     .replace(/<think>[\s\S]*?<\/think>/gi, '')
     .replace(/<\/?think>/gi, '')
+    .replace(/[#*_~`>|]{2,}/g, '')
+    .replace(/(?:^|\n)\s*[-*+]\s+/g, '$1')
+    .replace(/(?:^|\n)\s*\d+[.、]\s+/g, '$1')
+    .replace(/\[([^\]]*)\]\([^)]+\)/g, '$1')
+    .replace(/!\[([^\]]*)\]\([^)]+\)/g, '$1')
+    .replace(/```[\s\S]*?```/g, '')
+    .replace(/`([^`]+)`/g, '$1')
     .trim()
 }
 

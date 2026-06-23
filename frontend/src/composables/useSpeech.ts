@@ -23,14 +23,33 @@ export function useSpeech(digitalHuman: () => DigitalHumanConfig | null) {
     return percent >= 0 ? `+${percent}%` : `${percent}%`
   }
 
+  function stripMarkdown(text: string): string {
+    return (text || '')
+      .replace(/<think>[\s\S]*?<\/think>/gi, '')
+      .replace(/<\/?think>/gi, '')
+      .replace(/[#*_~`>|]{2,}/g, '')
+      .replace(/(?:^|\n)\s*[-*+]\s+/g, '$1')
+      .replace(/(?:^|\n)\s*\d+[.、]\s+/g, '$1')
+      .replace(/\[([^\]]*)\]\([^)]+\)/g, '$1')
+      .replace(/!\[([^\]]*)\]\([^)]+\)/g, '$1')
+      .replace(/```[\s\S]*?```/g, '')
+      .replace(/`([^`]+)`/g, '$1')
+      .trim()
+  }
+
   async function speakText(text: string, index: number) {
     if (isSpeaking.value[index]) return
     isSpeaking.value[index] = true
     let objectUrl = ''
     try {
       const dh = digitalHuman()
+      const cleaned = stripMarkdown(text)
+      if (!cleaned) {
+        isSpeaking.value[index] = false
+        return
+      }
       const blob = await synthesizeSpeech(
-        text,
+        cleaned,
         dh?.voiceName,
         speechSpeedToRate(dh?.speechSpeed)
       )
