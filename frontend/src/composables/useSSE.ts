@@ -24,6 +24,39 @@ function parseSseEvent(raw: string): SseEvent {
   return { eventName, data: dataLines.join('\n') }
 }
 
+function splitAssistantContent(raw: string): { thinking: string; answer: string } {
+  const thinkingParts: string[] = []
+  const answerParts: string[] = []
+  const openTag = '<think>'
+  const closeTag = '</think>'
+  let cursor = 0
+
+  while (cursor < raw.length) {
+    const lower = raw.toLowerCase()
+    const openIdx = lower.indexOf(openTag, cursor)
+    if (openIdx < 0) {
+      answerParts.push(raw.slice(cursor))
+      break
+    }
+
+    answerParts.push(raw.slice(cursor, openIdx))
+    const thinkStart = openIdx + openTag.length
+    const closeIdx = lower.indexOf(closeTag, thinkStart)
+    if (closeIdx < 0) {
+      thinkingParts.push(raw.slice(thinkStart))
+      break
+    }
+
+    thinkingParts.push(raw.slice(thinkStart, closeIdx))
+    cursor = closeIdx + closeTag.length
+  }
+
+  return {
+    thinking: thinkingParts.join('').trim(),
+    answer: answerParts.join('').replace(/<\/?think>/gi, '').trimStart(),
+  }
+}
+
 function handleEvent(raw: string, aiMsg: ChatMessage) {
   const { eventName, data } = parseSseEvent(raw)
   if (eventName === 'meta') {
@@ -39,7 +72,10 @@ function handleEvent(raw: string, aiMsg: ChatMessage) {
       aiMsg.references = []
     }
   } else if (eventName === 'message' || eventName === 'data') {
-    aiMsg.content = aiMsg.content + data
+    aiMsg.rawContent = (aiMsg.rawContent || '') + data
+    const parsed = splitAssistantContent(aiMsg.rawContent)
+    aiMsg.thinkingContent = parsed.thinking
+    aiMsg.content = parsed.answer
   } else if (eventName === 'error') {
     aiMsg.content += `\n[系统错误]: ${data}`
   }

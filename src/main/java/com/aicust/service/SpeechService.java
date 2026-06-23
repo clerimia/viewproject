@@ -2,6 +2,7 @@ package com.aicust.service;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -29,6 +30,9 @@ public class SpeechService {
     private static final String DEFAULT_VOLUME = "+0%";
     /** 执行超时（秒） */
     private static final long TIMEOUT_SECONDS = 30;
+
+    @Value("${speech.tts.edge-tts-bin:edge-tts}")
+    private String edgeTtsBin;
 
     /**
      * 使用默认发音人和语速合成语音。
@@ -71,7 +75,7 @@ public class SpeechService {
             tempFile = Files.createTempFile("tts_", ".mp3");
 
             List<String> command = List.of(
-                    "edge-tts",
+                    edgeTtsBin,
                     "--text", text,
                     "--voice", voice,
                     "--rate", rate,
@@ -109,9 +113,9 @@ public class SpeechService {
         } catch (IOException e) {
             if (e.getMessage() != null && (e.getMessage().contains("No such file")
                     || e.getMessage().contains("Cannot run program"))) {
-                log.warn("edge-tts not installed. Install with: pip install edge-tts");
+                log.warn("edge-tts not found: {}. Install with: pip install edge-tts or set EDGE_TTS_BIN", edgeTtsBin);
                 throw new RuntimeException(
-                        "edge-tts 未安装，请执行: pip install edge-tts", e);
+                        "edge-tts 未安装或路径不正确，请安装 edge-tts 或配置 EDGE_TTS_BIN", e);
             }
             log.error("TTS IO error", e);
             throw new RuntimeException("语音合成IO错误: " + e.getMessage(), e);

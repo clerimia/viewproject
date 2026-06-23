@@ -12,4 +12,4 @@ public class PlanService {
         return new AiPlan("FREE", 10_000);
     }
 
-    }
+}

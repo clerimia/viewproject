@@ -29,51 +29,76 @@
 
 ## 快速启动
 
+详细启动说明见：[docs/startup-guide.md](docs/startup-guide.md)。
+
+### 推荐：本地混合开发模式
+
+```text
+Docker：MySQL + Redis
+本地：Spring Boot 后端 + Vue 前端 + Ollama + Whisper ASR + edge-tts
+```
+
 ### 前置要求
 
-- Docker + Docker Compose
+- JDK 21
 - Node.js 20+
-- pnpm 或 npm
+- Docker + Docker Compose
+- Python 3.10+
+- Ollama
+- Git Bash（Windows 下运行 `scripts/*.sh`）
 
-### 1. 启动后端（Docker）
-
-```bash
-# 进入项目目录
-cd /path/to/project
-
-# 启动所有���务（MySQL + Redis + Spring Boot）
-docker compose up -d
-
-# 查看日志
-docker compose logs -f ai-cust
-```
-
-后端启动成功后：
-- API 地址：`http://localhost:8888`
-- MySQL：`localhost:3306`（root/root123）
-- Redis：`localhost:6381`
-
-### 2. 启动前端（开发模式）
+### 1. 准备环境变量
 
 ```bash
-# 进入前端目录
-cd frontend
-
-# 安装依赖（首次）
-npm install
-
-# 启动开发服务器
-npm run dev
+cp .env.example .env
 ```
 
-前端启动成功后访问：`http://localhost:5173`
+按本机情况修改 `.env`，尤其是：
 
-### 3. 默认账号
+```env
+MYSQL_ROOT_PASSWORD=root123
+MYSQL_PORT=3307
+REDIS_PORT=6380
+EDGE_TTS_BIN=E:\Project\viewproject\.venv\Scripts\edge-tts.exe
+RAG_PASSWORD=your_rag_password
+```
+
+### 2. 准备 Python 虚拟环境（首次）
+
+```bash
+python -m venv .venv
+source .venv/Scripts/activate
+python -m pip install --upgrade pip
+pip install faster-whisper edge-tts
+```
+
+### 3. 按顺序启动开发服务
+
+```bash
+# MySQL + Redis
+bash scripts/dev-infra.sh
+
+# Whisper ASR 服务（TTS 不需要单独服务，后端会调用 edge-tts）
+bash scripts/dev-tts.sh
+
+# Spring Boot 后端
+bash scripts/dev-backend.sh
+
+# Vue/Vite 前端
+bash scripts/dev-frontend.sh
+```
+
+前端访问：`http://localhost:5173`  
+后端 API：`http://localhost:8888`
+
+### 4. 默认账号
 
 | 角色 | 用户名 | 密码 | 说明 |
 |------|--------|------|------|
-| 管理员 | admin | admin123 | 可进入管理后台 |
-| 游客 | (自行注册) | 自行注册 | 仅限游客端 |
+| 管理员 | admin | admin123 | 登录页选择“管理端” |
+| 游客 | 自行注册 | 自行设置 | 注册入口只创建游客账号 |
+
+如数据库中已有旧 `admin` 密码，可临时设置 `ADMIN_RESET_PASSWORD=true` 后重启后端重置密码。
 
 ## 功能模块
 
@@ -166,34 +191,48 @@ docker compose build ai-cust
 
 ### 环境变量
 
-如需修改配置，编辑 `src/main/resources/application.yml`：
+本地开发优先修改 `.env`，不要直接改 `application.yml`。常用变量：
 
-```yaml
-# RAG 服务地址
-rag:
-  base-url: http://1.117.74.151:8081
-  username: admin
-  password: admin123
-
-# Ollama
-ollama:
-  base-url: http://localhost:11434
+```env
+SERVER_PORT=8888
+MYSQL_HOST=localhost
+MYSQL_PORT=3307
+REDIS_HOST=localhost
+REDIS_PORT=6380
+OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_MODEL=qwen2.5:3b
+RAG_BASE_URL=http://1.117.74.151:8081
+EDGE_TTS_BIN=E:\Project\viewproject\.venv\Scripts\edge-tts.exe
 ```
 
 ## 常见问题
 
 ### 1. 前端无法访问后端 API
 
-确保 Docker 后端已启动：
+开发模式下，确保后端已启动在 `8888`：
+
 ```bash
-docker compose ps
+curl -i http://localhost:8888/api/digital-human/active
 ```
+
+如果 Vite 输出 `http proxy error: ECONNREFUSED`，通常是前端启动早于后端。等后端启动完成后刷新页面即可。
 
 ### 2. 语音功能无法使用
 
-确保本地安装了：
-- `edge-tts`：`pip install edge-tts`
-- `faster-whisper` 并启动 HTTP 服务（默认 9876 端口）
+确保已创建虚拟环境并安装依赖：
+
+```bash
+source .venv/Scripts/activate
+pip install faster-whisper edge-tts
+```
+
+启动 ASR：
+
+```bash
+bash scripts/dev-tts.sh
+```
+
+TTS 不需要单独启动服务，但后端需要配置 `EDGE_TTS_BIN` 指向 `.venv` 中的 `edge-tts.exe`。
 
 ### 3. 注册失败显示 500 错误
 

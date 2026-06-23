@@ -68,11 +68,39 @@ const avatarStatusText = computed(
 
 const speech = useSpeech(() => dhStore.config)
 const lipSync = useLipSync()
+const pausedSpeech = ref<Record<number, boolean>>({})
+const audioByMessage = new Map<number, HTMLAudioElement>()
+const audioUrlByMessage = new Map<number, string>()
+
+function finalAnswerOnly(content: string) {
+  return (content || '')
+    .replace(/<think>[\s\S]*?<\/think>/gi, '')
+    .replace(/<\/?think>/gi, '')
+    .trim()
+}
 
 // Enhanced speak with lip-sync
 async function speakWithLipSync(content: string, index: number) {
-  if (speech.isSpeaking.value[index]) return
+  const existingAudio = audioByMessage.get(index)
+  if (existingAudio) {
+    if (existingAudio.paused) {
+      speech.isSpeaking.value[index] = true
+      pausedSpeech.value[index] = false
+      await existingAudio.play()
+    } else {
+      existingAudio.pause()
+      lipSync.stopLipSync()
+      speech.isSpeaking.value[index] = false
+      pausedSpeech.value[index] = true
+    }
+    return
+  }
+
+  const speakText = finalAnswerOnly(content)
+  if (!speakText) return
+
   speech.isSpeaking.value[index] = true
+  pausedSpeech.value[index] = false
   let objectUrl = ''
   try {
     const { synthesizeSpeech } = await import('@/api/speech')
@@ -95,16 +123,34 @@ async function speakWithLipSync(content: string, index: number) {
       const percent = Math.round((numeric - 1) * 100)
       return percent >= 0 ? `+${percent}%` : `${percent}%`
     })()
-    const blob = await synthesizeSpeech(content, dh?.voiceName, rate, pitch, volume)
+    const blob = await synthesizeSpeech(speakText, dh?.voiceName, rate, pitch, volume)
     objectUrl = URL.createObjectURL(blob)
     const audio = new Audio(objectUrl)
+    audioByMessage.set(index, audio)
+    audioUrlByMessage.set(index, objectUrl)
 
-    audio.onplay = () => lipSync.startLipSync(audio)
+    audio.onplay = () => {
+      speech.isSpeaking.value[index] = true
+      pausedSpeech.value[index] = false
+      lipSync.startLipSync(audio)
+    }
+
+    audio.onpause = () => {
+      if (!audio.ended) {
+        speech.isSpeaking.value[index] = false
+        pausedSpeech.value[index] = true
+        lipSync.stopLipSync()
+      }
+    }
 
     const cleanup = () => {
       lipSync.stopLipSync()
       speech.isSpeaking.value[index] = false
-      if (objectUrl) URL.revokeObjectURL(objectUrl)
+      pausedSpeech.value[index] = false
+      audioByMessage.delete(index)
+      const url = audioUrlByMessage.get(index)
+      audioUrlByMessage.delete(index)
+      if (url) URL.revokeObjectURL(url)
     }
     audio.onended = cleanup
     audio.onerror = cleanup
@@ -113,6 +159,9 @@ async function speakWithLipSync(content: string, index: number) {
     console.warn('TTS error', e)
     lipSync.stopLipSync()
     speech.isSpeaking.value[index] = false
+    pausedSpeech.value[index] = false
+    audioByMessage.delete(index)
+    audioUrlByMessage.delete(index)
     if (objectUrl) URL.revokeObjectURL(objectUrl)
   }
 }
@@ -131,6 +180,8 @@ async function handleSend(text: string, options: { speakReply?: boolean } = {}) 
   const aiMsg = reactive<ChatMessage>({
     role: 'assistant',
     content: '',
+    rawContent: '',
+    thinkingContent: '',
     references: [],
     interactionLogId: null,
     satisfaction: null,
@@ -264,6 +315,7 @@ onMounted(() => {
           <ChatMessageComponent
             :msg="msg"
             :is-speaking="!!speech.isSpeaking.value[index]"
+            :is-paused="!!pausedSpeech[index]"
             @speak="(content: string) => handleSpeak(content, index)"
           />
         </div>

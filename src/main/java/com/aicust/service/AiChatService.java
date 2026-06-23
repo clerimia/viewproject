@@ -137,7 +137,7 @@ public class AiChatService {
                 .doOnComplete(() -> {
                     int actual = actualLength.get();
                     long duration = System.currentTimeMillis() - startTime;
-                    String answer = fullAnswerRef.get();
+                    String answer = normalizeFinalAnswer(fullAnswerRef.get());
 
                     quotaService.settle(userId, estimated, actual);
                     memoryService.addMessage(userId, new AssistantMessage(answer));
@@ -231,7 +231,7 @@ public class AiChatService {
      */
     private String buildSystemPrompt(List<RagSearchService.SearchHit> hits, String category) {
         // 关键要求：禁止输出任何 Markdown 符号，否则 TTS 会读出来
-        String noFormat = "\n重要：回答时不要使用任何格式符号，如 # * - > [ ] { } | 等，也不要使用 Markdown 语法。只需输出纯文本的自然语言，方便语音朗读。";
+        String noFormat = "\n重要：回答时不要使用任何格式符号，如 # * - > [ ] { } | 等，也不要使用 Markdown 语法。正式回答请输出纯文本的自然语言，方便页面展示和语音朗读。";
 
         if (hits.isEmpty()) {
             String catHint = category != null ? "关于" + category + "方面的" : "";
@@ -261,6 +261,15 @@ public class AiChatService {
         sb.append(noFormat);
 
         return sb.toString();
+    }
+
+    private String normalizeFinalAnswer(String value) {
+        if (value == null || value.isBlank()) {
+            return "";
+        }
+        return value.replaceAll("(?is)<think>.*?</think>", "")
+                .replaceAll("(?is)</?think>", "")
+                .trim();
     }
 
     /** 将前端 mode 转为 RAG category */

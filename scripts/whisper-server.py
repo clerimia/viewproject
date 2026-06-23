@@ -3,10 +3,13 @@
 import json, os, sys, signal
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
-os.environ["HF_HOME"] = "/opt/whisper-models"
-os.environ["HF_HUB_CACHE"] = "/opt/whisper-models/hub"
+os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
+os.environ.setdefault("HF_HOME", os.path.abspath(".cache/whisper-models"))
+os.environ.setdefault("HF_HUB_CACHE", os.path.abspath(".cache/whisper-models/hub"))
+os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
 
 MODEL_NAME = os.environ.get("WHISPER_MODEL", "small")
+
 
 print(f"Loading whisper model: {MODEL_NAME} ...", file=sys.stderr, flush=True)
 from faster_whisper import WhisperModel

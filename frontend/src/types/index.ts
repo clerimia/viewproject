@@ -17,6 +17,8 @@ export interface LoginResponse {
 export interface ChatMessage {
   role: 'user' | 'assistant'
   content: string
+  rawContent?: string
+  thinkingContent?: string
   references: Reference[]
   interactionLogId: number | null
   satisfaction: number | null

@@ -8,6 +8,7 @@ import LoadingDots from '@/components/common/LoadingDots.vue'
 defineProps<{
   msg: ChatMsg
   isSpeaking: boolean
+  isPaused?: boolean
 }>()
 
 defineEmits<{
@@ -63,6 +64,21 @@ defineEmits<{
         </div>
       </div>
 
+      <!-- Thinking content -->
+      <details
+        v-if="msg.thinkingContent"
+        class="rounded-2xl border border-amber-100 bg-amber-50/70 text-xs text-amber-900 overflow-hidden"
+        :open="msg.isTyping"
+      >
+        <summary class="cursor-pointer select-none px-3 py-2 flex items-center gap-2 font-medium">
+          <span class="animate-pulse">🧭</span>
+          <span>{{ msg.isTyping ? '正在思考与检索...' : '查看思考过程' }}</span>
+        </summary>
+        <div class="px-3 pb-3 pt-1 whitespace-pre-wrap leading-relaxed text-amber-900/80 border-t border-amber-100">
+          {{ msg.thinkingContent }}
+        </div>
+      </details>
+
       <!-- Content + TTS -->
       <div class="flex items-end gap-1">
         <div
@@ -70,22 +86,26 @@ defineEmits<{
           class="bg-white/95 border border-emerald-100 p-4 rounded-2xl rounded-tl-sm text-sm text-gray-800 shadow-sm prose max-w-none flex-1"
         >
           <div v-html="renderMarkdown(msg.content)"></div>
-          <div class="text-[10px] text-red-500 mt-1">raw: {{ msg.content.substring(0, 50) }}</div>
         </div>
         <button
           v-if="msg.content"
           @click="$emit('speak', msg.content)"
-          :disabled="isSpeaking || msg.isTyping"
+          :disabled="msg.isTyping"
           :class="[
             'flex-shrink-0 p-2 rounded-full transition-all duration-200',
             isSpeaking
               ? 'bg-emerald-100 text-emerald-700 tts-playing'
-              : 'text-gray-400 hover:text-emerald-700 hover:bg-emerald-50',
+              : isPaused
+                ? 'bg-amber-100 text-amber-700'
+                : 'text-gray-400 hover:text-emerald-700 hover:bg-emerald-50',
           ]"
-          :title="isSpeaking ? '正在播放...' : '朗读此消息'"
+          :title="isSpeaking ? '暂停朗读' : isPaused ? '继续朗读' : '朗读正式回答'"
         >
-          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M19.114 5.636a9 9 0 010 12.728M16.463 8.288a5.25 5.25 0 010 7.424M6.75 8.25l4.72-4.72a.75.75 0 011.28.53v15.88a.75.75 0 01-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.507-1.938-1.354A9.01 9.01 0 012.25 12c0-.83.112-1.633.322-2.396C2.806 8.756 3.63 8.25 4.51 8.25H6.75z" />
+          <svg v-if="isSpeaking" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 5.25v13.5m-7.5-13.5v13.5" />
+          </svg>
+          <svg v-else xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 010 1.972l-11.54 6.347a1.125 1.125 0 01-1.667-.986V5.653z" />
           </svg>
         </button>
       </div>
