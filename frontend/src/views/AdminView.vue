@@ -31,6 +31,18 @@ const uploadMsg = ref('')
 const uploadTid = ref<ReturnType<typeof setTimeout> | null>(null)
 const ingestMsg = ref('')
 const ingestTid = ref<ReturnType<typeof setTimeout> | null>(null)
+const uploading = ref(false)
+const ingesting = ref(false)
+
+// Toast notification
+const toast = ref({ show: false, message: '', type: 'success' as 'success' | 'error' })
+const toastTid = ref<ReturnType<typeof setTimeout> | null>(null)
+
+function showToast(message: string, type: 'success' | 'error' = 'success') {
+  toast.value = { show: true, message, type }
+  if (toastTid.value) clearTimeout(toastTid.value)
+  toastTid.value = setTimeout(() => { toast.value.show = false }, 4000)
+}
 
 function showMsg(msg: string) {
   uploadMsg.value = msg
@@ -71,13 +83,16 @@ async function handleUpload() {
     showMsg('请填写 Source ID 并选择文件')
     return
   }
+  uploading.value = true
   try {
     const res = await uploadKnowledge(uploadFile.value, uploadForm.sourceId, uploadForm.title, uploadForm.category)
     if (!res.success) {
       showMsg('上传失败: ' + (res.message || '未知错误'))
+      showToast('上传失败: ' + (res.message || '请检查RAG服务'), 'error')
       return
     }
     showMsg('✅ 上传成功')
+    showToast('文档上传成功', 'success')
     uploadFile.value = null
     uploadForm.sourceId = ''
     uploadForm.title = ''
@@ -85,6 +100,9 @@ async function handleUpload() {
     await loadDocs()
   } catch (e: any) {
     showMsg('上传失败: ' + (e.response?.data?.message || e.message))
+    showToast('上传失败: ' + (e.response?.data?.message || e.message), 'error')
+  } finally {
+    uploading.value = false
   }
 }
 
@@ -93,13 +111,16 @@ async function handleIngest() {
     showIngestMsg('请填写 Source ID 和文本内容')
     return
   }
+  ingesting.value = true
   try {
     const res = await ingestText(ingestForm)
     if (!res.success) {
       showIngestMsg('导入失败: ' + (res.message || '未知错误'))
+      showToast('导入失败: ' + (res.message || '请检查RAG服务'), 'error')
       return
     }
     showIngestMsg('✅ 导入成功')
+    showToast('知识文本导入成功', 'success')
     ingestForm.text = ''
     ingestForm.sourceId = ''
     ingestForm.title = ''
@@ -107,6 +128,9 @@ async function handleIngest() {
     await loadDocs()
   } catch (e: any) {
     showIngestMsg('导入失败: ' + (e.response?.data?.message || e.message))
+    showToast('导入失败: ' + (e.response?.data?.message || e.message), 'error')
+  } finally {
+    ingesting.value = false
   }
 }
 
@@ -421,10 +445,12 @@ onUnmounted(() => {
           </div>
           <button
             @click="handleUpload"
-            :disabled="!uploadFile || !uploadForm.sourceId"
-            class="w-full py-3 bg-emerald-700 text-white rounded-xl font-medium hover:bg-emerald-800 transition disabled:bg-gray-300 disabled:cursor-not-allowed"
+            :disabled="!uploadFile || !uploadForm.sourceId || uploading"
+            class="w-full py-3 rounded-xl font-medium transition flex items-center justify-center gap-2 disabled:cursor-not-allowed"
+            :class="uploading ? 'bg-emerald-500 text-white' : (!uploadFile || !uploadForm.sourceId ? 'bg-gray-300 text-gray-500' : 'bg-emerald-700 text-white hover:bg-emerald-800')"
           >
-            {{ uploadFile ? '上传文档' : '请先选择文件' }}
+            <span v-if="uploading" class="inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+            <span>{{ uploading ? '上传中...' : (uploadFile ? '上传文档' : '请先选择文件') }}</span>
           </button>
           <p v-if="uploadMsg" class="text-sm text-center" :class="uploadMsg.includes('成功') ? 'text-emerald-600' : 'text-red-600'">
             {{ uploadMsg }}
@@ -441,8 +467,12 @@ onUnmounted(() => {
           </div>
           <textarea v-model="ingestForm.text" rows="4" placeholder="粘贴知识文本..." class="w-full px-3 py-2 border border-emerald-100 rounded-xl text-sm"></textarea>
           <div class="flex items-center gap-3">
-            <button @click="handleIngest" class="px-4 py-2 bg-emerald-700 text-white rounded-xl text-sm hover:bg-emerald-800 transition">
-              导入
+            <button @click="handleIngest" :disabled="ingesting"
+              class="px-4 py-2 rounded-xl text-sm font-medium transition flex items-center gap-2 disabled:cursor-not-allowed"
+              :class="ingesting ? 'bg-emerald-500 text-white' : 'bg-emerald-700 text-white hover:bg-emerald-800'"
+            >
+              <span v-if="ingesting" class="inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+              <span>{{ ingesting ? '导入中...' : '导入' }}</span>
             </button>
             <span v-if="ingestMsg" :class="ingestMsg.startsWith('✅') ? 'text-emerald-600' : 'text-red-600'" class="text-sm">{{ ingestMsg }}</span>
           </div>
@@ -714,4 +744,19 @@ onUnmounted(() => {
       </div>
     </div>
   </div>
+
+  <!-- Toast notification -->
+  <Teleport to="body">
+    <transition name="toast">
+      <div
+        v-if="toast.show"
+        class="fixed top-6 right-6 z-[9999] px-5 py-3 rounded-2xl shadow-2xl text-sm font-medium flex items-center gap-3 pointer-events-auto border transition-all duration-300"
+        :class="toast.type === 'success' ? 'bg-emerald-700 text-white border-emerald-600' : 'bg-red-600 text-white border-red-500'"
+      >
+        <span class="text-lg">{{ toast.type === 'success' ? '✅' : '❌' }}</span>
+        <span>{{ toast.message }}</span>
+        <button @click="toast.show = false" class="ml-2 opacity-70 hover:opacity-100 text-lg leading-none">&times;</button>
+      </div>
+    </transition>
+  </Teleport>
 </template>
