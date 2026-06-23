@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { fetchDashboard } from '@/api/dashboard'
@@ -12,19 +12,24 @@ const auth = useAuthStore()
 const data = ref<DashboardData | null>(null)
 const loading = ref(true)
 
+let loadingRequest = false
 let hotQaChart: echarts.ECharts | null = null
 let trendChart: echarts.ECharts | null = null
 let attractionChart: echarts.ECharts | null = null
 let refreshTimer: ReturnType<typeof setInterval> | null = null
 
 async function loadData() {
+  if (loadingRequest) return
+  loadingRequest = true
   try {
     data.value = await fetchDashboard()
-    renderCharts()
   } catch (e) {
     console.warn('Dashboard load failed', e)
   } finally {
     loading.value = false
+    loadingRequest = false
+    await nextTick()
+    renderCharts()
   }
 }
 
@@ -102,7 +107,10 @@ function renderCharts() {
         {
           type: 'pie',
           radius: ['35%', '65%'],
-          data: data.value.attractionDistribution?.map((i) => ({ name: i.name, value: i.count })) || [],
+          data: data.value.attractionDistribution?.map((i: any) => ({
+            name: i.name,
+            value: i.count ?? i.score ?? 0,
+          })) || [],
           label: { color: '#e2e8f0' },
           itemStyle: {
             borderRadius: 6,
@@ -120,18 +128,21 @@ function logout() {
   router.push({ name: 'login' })
 }
 
+function handleResize() {
+  hotQaChart?.resize()
+  trendChart?.resize()
+  attractionChart?.resize()
+}
+
 onMounted(() => {
   loadData()
   refreshTimer = setInterval(loadData, 30000)
-  window.addEventListener('resize', () => {
-    hotQaChart?.resize()
-    trendChart?.resize()
-    attractionChart?.resize()
-  })
+  window.addEventListener('resize', handleResize)
 })
 
 onUnmounted(() => {
   if (refreshTimer) clearInterval(refreshTimer)
+  window.removeEventListener('resize', handleResize)
   hotQaChart?.dispose()
   trendChart?.dispose()
   attractionChart?.dispose()
@@ -143,13 +154,28 @@ onUnmounted(() => {
     <!-- Header -->
     <div class="flex items-center justify-between px-6 py-4 border-b border-slate-700">
       <h1 class="display-font text-2xl font-bold">📊 云隐山 AI 数字人数据大屏</h1>
-      <div class="flex items-center gap-4">
-        <a href="/" class="text-sm text-slate-400 hover:text-white">← 返回导览</a>
-        <button @click="logout" class="text-sm text-slate-400 hover:text-white">退出</button>
+      <div class="flex items-center gap-3">
+        <a
+          href="/"
+          class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm text-slate-400 hover:text-white hover:bg-slate-800 transition"
+        >
+          <span>🏞️</span>
+          <span>返回导览</span>
+        </a>
+        <button
+          @click="logout"
+          class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm text-slate-400 hover:text-red-400 hover:bg-slate-800 transition"
+        >
+          <span>🚪</span>
+          <span>退出</span>
+        </button>
       </div>
     </div>
 
-    <div v-if="loading" class="flex items-center justify-center h-64 text-slate-400">加载中...</div>
+    <div v-if="loading" class="flex flex-col items-center justify-center h-64 gap-4">
+      <div class="w-10 h-10 border-4 border-emerald-200 border-t-emerald-700 rounded-full animate-spin"></div>
+      <span class="text-sm text-emerald-600">正在加载服务数据...</span>
+    </div>
 
     <div v-else class="p-6 space-y-6">
       <!-- KPI cards -->

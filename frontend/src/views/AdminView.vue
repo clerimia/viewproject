@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, reactive } from 'vue'
+import { ref, onMounted, onUnmounted, reactive, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { listDocuments, deleteDocument, uploadKnowledge, ingestText } from '@/api/knowledge'
@@ -189,18 +189,28 @@ function logout() {
 const sentimentData = ref<any>(null)
 const sentimentLoading = ref(false)
 const sentimentDays = ref(7)
+const loadedSentimentDays = ref<number | null>(null)
 let sentimentChart: echarts.ECharts | null = null
 let focusChart: echarts.ECharts | null = null
 
-async function loadSentiment() {
+async function loadSentiment(force = false) {
+  if (sentimentLoading.value) return
+  if (!force && sentimentData.value && loadedSentimentDays.value === sentimentDays.value) {
+    await nextTick()
+    renderSentimentCharts()
+    return
+  }
+
   sentimentLoading.value = true
   try {
     sentimentData.value = await fetchSentimentReport(sentimentDays.value)
-    renderSentimentCharts()
+    loadedSentimentDays.value = sentimentDays.value
   } catch (e) {
     console.warn('情感报告加载失败', e)
   } finally {
     sentimentLoading.value = false
+    await nextTick()
+    renderSentimentCharts()
   }
 }
 
@@ -211,7 +221,8 @@ function renderSentimentCharts() {
   // Sentiment pie chart
   const sentEl = document.getElementById('sentimentPieChart')
   if (sentEl) {
-    if (!sentimentChart) sentimentChart = echarts.init(sentEl)
+    sentimentChart?.dispose()
+    sentimentChart = echarts.init(sentEl)
     sentimentChart.setOption({
       title: { text: '情感分布', left: 'center', textStyle: { fontSize: 14 } },
       tooltip: { trigger: 'item' },
@@ -231,7 +242,8 @@ function renderSentimentCharts() {
   // Focus clusters bar chart
   const focusEl = document.getElementById('focusClustersChart')
   if (focusEl && s.focusClusters?.length) {
-    if (!focusChart) focusChart = echarts.init(focusEl)
+    focusChart?.dispose()
+    focusChart = echarts.init(focusEl)
     const top10 = s.focusClusters.slice(0, 10)
     focusChart.setOption({
       title: { text: '游客关注点 Top10', left: 'center', textStyle: { fontSize: 14 } },
@@ -250,6 +262,11 @@ function renderSentimentCharts() {
 onMounted(() => {
   loadDocs()
   loadDhList()
+})
+
+onUnmounted(() => {
+  sentimentChart?.dispose()
+  focusChart?.dispose()
 })
 </script>
 
@@ -278,7 +295,7 @@ onMounted(() => {
           🤖 数字人配置
         </button>
         <button
-          @click="activeTab = 'sentiment'; loadSentiment()"
+          @click="activeTab = 'sentiment'; loadSentiment(false)"
           :class="[
             'w-full text-left px-4 py-3 rounded-xl transition',
             activeTab === 'sentiment' ? 'bg-white/15 text-white' : 'text-emerald-100 hover:bg-white/10',
@@ -287,10 +304,28 @@ onMounted(() => {
           💬 情感报告
         </button>
       </nav>
-      <div class="mt-auto pt-8 space-y-2">
-        <a href="/" class="block text-sm text-emerald-100 hover:text-white hover:underline">← 返回导览</a>
-        <a href="/dashboard" class="block text-sm text-emerald-100 hover:text-white hover:underline">📊 数据大屏</a>
-        <button @click="logout" class="block text-sm text-emerald-100 hover:text-white hover:underline">退出登录</button>
+      <div class="mt-auto pt-8 space-y-2 border-t border-white/10">
+        <a
+          href="/"
+          class="flex items-center gap-2 w-full px-4 py-3 rounded-xl text-sm text-emerald-100 hover:bg-white/10 hover:text-white transition"
+        >
+          <span>🏞️</span>
+          <span>返回景区导览</span>
+        </a>
+        <a
+          href="/dashboard"
+          class="flex items-center gap-2 w-full px-4 py-3 rounded-xl text-sm text-emerald-100 hover:bg-white/10 hover:text-white transition"
+        >
+          <span>📊</span>
+          <span>数据大屏</span>
+        </a>
+        <button
+          @click="logout"
+          class="flex items-center gap-2 w-full px-4 py-3 rounded-xl text-sm text-emerald-100 hover:bg-red-500/20 hover:text-red-300 transition"
+        >
+          <span>🚪</span>
+          <span>退出登录</span>
+        </button>
       </div>
     </div>
 
@@ -551,18 +586,23 @@ onMounted(() => {
         <div class="flex items-center justify-between">
           <h2 class="display-font text-2xl font-bold text-emerald-950">💬 游客感受度报告</h2>
           <div class="flex items-center gap-2">
-            <select v-model="sentimentDays" @change="loadSentiment()" class="px-3 py-2 border border-emerald-100 rounded-xl text-sm">
+            <select v-model="sentimentDays" @change="loadSentiment(true)" class="px-3 py-2 border border-emerald-100 rounded-xl text-sm">
               <option :value="7">近 7 天</option>
               <option :value="14">近 14 天</option>
               <option :value="30">近 30 天</option>
             </select>
-            <button @click="loadSentiment()" class="px-4 py-2 bg-emerald-700 text-white rounded-xl text-sm hover:bg-emerald-800 transition">
+            <button @click="loadSentiment(true)" class="px-4 py-2 bg-emerald-700 text-white rounded-xl text-sm hover:bg-emerald-800 transition">
               刷新
             </button>
           </div>
         </div>
 
-        <div v-if="sentimentLoading" class="text-center py-12 text-emerald-600">加载中...</div>
+        <div v-if="sentimentLoading" class="text-center py-12">
+          <div class="inline-flex flex-col items-center gap-3">
+            <div class="w-8 h-8 border-4 border-emerald-200 border-t-emerald-700 rounded-full animate-spin"></div>
+            <span class="text-sm text-emerald-600">正在加载情感分析报告...</span>
+          </div>
+        </div>
 
         <template v-else-if="sentimentData">
           <!-- KPI cards -->

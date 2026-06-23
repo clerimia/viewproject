@@ -50,6 +50,40 @@ public interface InteractionLogRepository extends JpaRepository<InteractionLog, 
     /** 当日总对话数 */
     long countByCreatedAtBetween(LocalDateTime start, LocalDateTime end);
 
+    /** 按情感标签聚合统计 */
+    @Query("SELECT i.sentimentLabel, COUNT(i), AVG(i.sentimentScore), COUNT(i.sentimentScore) FROM InteractionLog i " +
+           "WHERE i.createdAt BETWEEN :start AND :end GROUP BY i.sentimentLabel")
+    List<Object[]> sentimentStatsInRange(@Param("start") LocalDateTime start,
+                                         @Param("end") LocalDateTime end);
+
+    /** 查询缺少情感标签的历史答案，用于兼容旧数据 */
+    @Query("SELECT i.answer FROM InteractionLog i " +
+           "WHERE i.createdAt BETWEEN :start AND :end AND i.sentimentLabel IS NULL")
+    List<String> answersWithoutSentimentInRange(@Param("start") LocalDateTime start,
+                                                @Param("end") LocalDateTime end);
+
+    /** 按日期聚合满意度趋势 */
+    @Query("SELECT FUNCTION('DATE', i.createdAt), COUNT(i), AVG(i.satisfaction), COUNT(i.satisfaction), " +
+           "SUM(CASE WHEN i.sentimentLabel = 'POSITIVE' THEN 1 ELSE 0 END) FROM InteractionLog i " +
+           "WHERE i.createdAt BETWEEN :start AND :end GROUP BY FUNCTION('DATE', i.createdAt) " +
+           "ORDER BY FUNCTION('DATE', i.createdAt)")
+    List<Object[]> satisfactionTrendStatsInRange(@Param("start") LocalDateTime start,
+                                                 @Param("end") LocalDateTime end);
+
+    /** 查询已持久化的关注点 */
+    @Query("SELECT i.focusPoints FROM InteractionLog i " +
+           "WHERE i.createdAt BETWEEN :start AND :end " +
+           "AND i.focusPoints IS NOT NULL AND i.focusPoints <> ''")
+    List<String> focusPointsInRange(@Param("start") LocalDateTime start,
+                                    @Param("end") LocalDateTime end);
+
+    /** 查询缺少关注点的历史问答，用于兼容旧数据 */
+    @Query("SELECT i.question, i.answer FROM InteractionLog i " +
+           "WHERE i.createdAt BETWEEN :start AND :end " +
+           "AND (i.focusPoints IS NULL OR i.focusPoints = '')")
+    List<Object[]> questionAnswersWithoutFocusPointsInRange(@Param("start") LocalDateTime start,
+                                                            @Param("end") LocalDateTime end);
+
     /** 本周（周一到周日）每天的对话数 */
     @Query("SELECT FUNCTION('DATE', i.createdAt), COUNT(i) FROM InteractionLog i " +
            "WHERE i.createdAt BETWEEN :start AND :end GROUP BY FUNCTION('DATE', i.createdAt) " +

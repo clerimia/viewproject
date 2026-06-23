@@ -4,7 +4,6 @@ import com.aicust.dto.SatisfactionTrendPoint;
 import com.aicust.dto.SentimentDistribution;
 import com.aicust.dto.SentimentReport;
 import com.aicust.dto.ServiceDashboard;
-import com.aicust.model.InteractionLog;
 import com.aicust.repository.InteractionLogRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -64,7 +63,7 @@ public class ReportService {
                 .collect(Collectors.toList());
 
         // 满意度趋势（最近7天）
-        List<SatisfactionTrendPoint> trend = buildSatisfactionTrend(now);
+        List<SatisfactionTrendPoint> trend = buildSatisfactionTrendFast(now);
 
         // 各景点关注度分布
         List<Map<String, Object>> attractionDist = buildAttractionDistribution(todayStart, now);
@@ -90,8 +89,8 @@ public class ReportService {
         LocalDateTime end = LocalDateTime.now();
         LocalDateTime start = end.minusDays(days);
 
-        List<InteractionLog> logs = logRepository.findByCreatedAtBetween(start, end);
-        if (logs.isEmpty()) {
+        long total = logRepository.countByCreatedAtBetween(start, end);
+        if (total == 0) {
             return SentimentReport.builder()
                     .sentiment(SentimentDistribution.builder().build())
                     .focusClusters(Collections.emptyList())
@@ -101,16 +100,17 @@ public class ReportService {
         }
 
         // 1. 情感分布
-        SentimentDistribution dist = analyzeSentimentDistribution(logs, start, end);
+        SentimentDistribution dist = analyzeSentimentDistribution(start, end);
 
         // 2. 关注点聚类
-        List<Map<String, Object>> clusters = buildFocusClusters(logs);
+        Map<String, Long> focusPoints = aggregateFocusPoints(start, end);
+        List<Map<String, Object>> clusters = buildFocusClusters(focusPoints);
 
         // 3. 满意度趋势（近7天）
-        List<Map<String, Object>> trend = buildSatisfactionTrendMap(end);
+        List<Map<String, Object>> trend = buildSatisfactionTrendMapFast(end);
 
         // 4. 各景点关注度
-        List<Map<String, Object>> attractions = buildAttractionScores(logs);
+        List<Map<String, Object>> attractions = buildAttractionScores(focusPoints);
 
         return SentimentReport.builder()
                 .sentiment(dist)
@@ -122,33 +122,38 @@ public class ReportService {
 
     // ======================== 私有辅助方法 ========================
 
-    private SentimentDistribution analyzeSentimentDistribution(List<InteractionLog> logs,
-                                                               LocalDateTime start, LocalDateTime end) {
+    private SentimentDistribution analyzeSentimentDistribution(LocalDateTime start, LocalDateTime end) {
         long positive = 0, neutral = 0, negative = 0;
         double totalScore = 0.0;
-        int scored = 0;
+        long scored = 0;
 
-        for (InteractionLog log : logs) {
-            // 优先使用已标注的情感
-            if (log.getSentimentLabel() != null) {
-                switch (log.getSentimentLabel()) {
-                    case "POSITIVE" -> positive++;
-                    case "NEGATIVE" -> negative++;
-                    default -> neutral++;
-                }
-                if (log.getSentimentScore() != null) {
-                    totalScore += log.getSentimentScore();
-                    scored++;
-                }
-            } else {
-                // 实时分析
-                SentimentAnalysisService.AnalysisResult result = sentimentService.analyze(log.getAnswer());
-                if (result.score() > 0.05) positive++;
-                else if (result.score() < -0.05) negative++;
-                else neutral++;
-                totalScore += result.score();
-                scored++;
+        for (Object[] row : logRepository.sentimentStatsInRange(start, end)) {
+            String label = (String) row[0];
+            long count = ((Number) row[1]).longValue();
+            Number avgScore = (Number) row[2];
+            long scoredCount = row[3] == null ? 0 : ((Number) row[3]).longValue();
+
+            if (label == null) {
+                continue;
             }
+            switch (label) {
+                case "POSITIVE" -> positive += count;
+                case "NEGATIVE" -> negative += count;
+                default -> neutral += count;
+            }
+            if (avgScore != null && scoredCount > 0) {
+                totalScore += avgScore.doubleValue() * scoredCount;
+                scored += scoredCount;
+            }
+        }
+
+        for (String answer : logRepository.answersWithoutSentimentInRange(start, end)) {
+            SentimentAnalysisService.AnalysisResult result = sentimentService.analyze(answer);
+            if (result.score() > 0.05) positive++;
+            else if (result.score() < -0.05) negative++;
+            else neutral++;
+            totalScore += result.score();
+            scored++;
         }
 
         double avgScore = scored > 0 ? totalScore / scored : 0.0;
@@ -163,21 +168,7 @@ public class ReportService {
                 .build();
     }
 
-    private List<Map<String, Object>> buildFocusClusters(List<InteractionLog> logs) {
-        // 合并所有日志的关注点和问答文本做词频统计
-        Map<String, Long> allFocus = new HashMap<>();
-        for (InteractionLog log : logs) {
-            if (log.getFocusPoints() != null && !log.getFocusPoints().isBlank()) {
-                Arrays.stream(log.getFocusPoints().split(","))
-                        .map(String::trim)
-                        .filter(s -> !s.isEmpty())
-                        .forEach(word -> allFocus.merge(word, 1L, Long::sum));
-            }
-            // 也统计问答中的景点关键词
-            Map<String, Long> extracted = sentimentService.extractFocusPoints(log.getQuestion(), log.getAnswer());
-            extracted.forEach((key, count) -> allFocus.merge(key, count, Long::sum));
-        }
-
+    private List<Map<String, Object>> buildFocusClusters(Map<String, Long> allFocus) {
         return allFocus.entrySet().stream()
                 .sorted(Map.Entry.<String, Long>comparingByValue().reversed())
                 .limit(20)
@@ -188,12 +179,7 @@ public class ReportService {
                 .collect(Collectors.toList());
     }
 
-    private List<Map<String, Object>> buildAttractionScores(List<InteractionLog> logs) {
-        Map<String, Long> scoreMap = new HashMap<>();
-        for (InteractionLog log : logs) {
-            Map<String, Long> points = sentimentService.extractFocusPoints(log.getQuestion(), log.getAnswer());
-            points.keySet().forEach(key -> scoreMap.merge(key, 1L, Long::sum));
-        }
+    private List<Map<String, Object>> buildAttractionScores(Map<String, Long> scoreMap) {
         return scoreMap.entrySet().stream()
                 .sorted(Map.Entry.<String, Long>comparingByValue().reversed())
                 .limit(15)
@@ -204,92 +190,95 @@ public class ReportService {
                 .collect(Collectors.toList());
     }
 
-    private List<SatisfactionTrendPoint> buildSatisfactionTrend(LocalDateTime now) {
+    private List<SatisfactionTrendPoint> buildSatisfactionTrendFast(LocalDateTime now) {
         LocalDate today = now.toLocalDate();
+        LocalDateTime start = today.minusDays(6).atStartOfDay();
+        LocalDateTime end = today.plusDays(1).atStartOfDay();
         List<SatisfactionTrendPoint> result = new ArrayList<>();
 
-        for (int i = 6; i >= 0; i--) {
-            LocalDate day = today.minusDays(i);
-            LocalDateTime start = day.atStartOfDay();
-            LocalDateTime end = day.plusDays(1).atStartOfDay();
-
-            List<InteractionLog> dayLogs = logRepository.findByCreatedAtBetween(start, end);
-            if (dayLogs.isEmpty()) continue;
-
-            int totalScore = 0;
-            long ratedCount = 0;
-            long posCount = 0;
-            for (InteractionLog log : dayLogs) {
-                if (log.getSatisfaction() != null) {
-                    totalScore += log.getSatisfaction();
-                    ratedCount++;
-                }
-                if (log.getSentimentLabel() != null && "POSITIVE".equals(log.getSentimentLabel())) {
-                    posCount++;
-                }
-            }
+        for (Object[] row : logRepository.satisfactionTrendStatsInRange(start, end)) {
+            String date = formatDateKey(row[0]);
+            long totalCount = ((Number) row[1]).longValue();
+            Number avgScore = (Number) row[2];
+            Number positiveCount = (Number) row[4];
 
             result.add(SatisfactionTrendPoint.builder()
-                    .date(day.format(DATE_FMT))
-                    .avgScore(ratedCount > 0 ? (double) totalScore / ratedCount : 0.0)
-                    .totalCount(dayLogs.size())
-                    .positiveRatio(posCount / (double) dayLogs.size())
+                    .date(date)
+                    .avgScore(avgScore == null ? 0.0 : Math.round(avgScore.doubleValue() * 100.0) / 100.0)
+                    .totalCount(totalCount)
+                    .positiveRatio(totalCount > 0 && positiveCount != null
+                            ? Math.round(positiveCount.doubleValue() / totalCount * 1000.0) / 1000.0
+                            : 0.0)
                     .build());
         }
 
         return result;
     }
 
-    private List<Map<String, Object>> buildSatisfactionTrendMap(LocalDateTime now) {
-        LocalDate today = now.toLocalDate();
-        List<Map<String, Object>> result = new ArrayList<>();
-
-        for (int i = 6; i >= 0; i--) {
-            LocalDate day = today.minusDays(i);
-            LocalDateTime start = day.atStartOfDay();
-            LocalDateTime end = day.plusDays(1).atStartOfDay();
-
-            List<InteractionLog> dayLogs = logRepository.findByCreatedAtBetween(start, end);
-            if (dayLogs.isEmpty()) continue;
-
-            int totalScore = 0;
-            long ratedCount = 0;
-            long posCount = 0;
-            for (InteractionLog log : dayLogs) {
-                if (log.getSatisfaction() != null) {
-                    totalScore += log.getSatisfaction();
-                    ratedCount++;
-                }
-                if (log.getSentimentLabel() != null && "POSITIVE".equals(log.getSentimentLabel())) {
-                    posCount++;
-                }
-            }
-
-            result.add(Map.<String, Object>of(
-                    "date", day.format(DATE_FMT),
-                    "avgScore", ratedCount > 0 ? Math.round((double) totalScore / ratedCount * 100.0) / 100.0 : 0.0,
-                    "totalCount", dayLogs.size(),
-                    "positiveRatio", Math.round(posCount / (double) dayLogs.size() * 1000.0) / 1000.0
-            ));
-        }
-
-        return result;
+    private List<Map<String, Object>> buildSatisfactionTrendMapFast(LocalDateTime now) {
+        return buildSatisfactionTrendFast(now).stream()
+                .map(point -> Map.<String, Object>of(
+                        "date", point.getDate(),
+                        "avgScore", point.getAvgScore(),
+                        "totalCount", point.getTotalCount(),
+                        "positiveRatio", point.getPositiveRatio()
+                ))
+                .collect(Collectors.toList());
     }
 
     private List<Map<String, Object>> buildAttractionDistribution(LocalDateTime start, LocalDateTime end) {
-        List<InteractionLog> logs = logRepository.findByCreatedAtBetween(start, end);
-        Map<String, Long> scoreMap = new HashMap<>();
-        for (InteractionLog log : logs) {
-            Map<String, Long> points = sentimentService.extractFocusPoints(log.getQuestion(), log.getAnswer());
-            points.forEach((k, v) -> scoreMap.merge(k, v, Long::sum));
-        }
+        Map<String, Long> scoreMap = aggregateFocusPoints(start, end);
         return scoreMap.entrySet().stream()
                 .sorted(Map.Entry.<String, Long>comparingByValue().reversed())
                 .limit(10)
                 .map(e -> Map.<String, Object>of(
                         "name", e.getKey(),
+                        "count", e.getValue(),
                         "score", e.getValue()
                 ))
                 .collect(Collectors.toList());
+    }
+
+    private Map<String, Long> aggregateFocusPoints(LocalDateTime start, LocalDateTime end) {
+        Map<String, Long> allFocus = new HashMap<>();
+
+        for (String focusPoints : logRepository.focusPointsInRange(start, end)) {
+            mergeFocusPointString(allFocus, focusPoints);
+        }
+
+        for (Object[] row : logRepository.questionAnswersWithoutFocusPointsInRange(start, end)) {
+            String question = row[0] == null ? "" : row[0].toString();
+            String answer = row[1] == null ? "" : row[1].toString();
+            sentimentService.extractFocusPoints(question, answer)
+                    .forEach((key, count) -> allFocus.merge(key, count, Long::sum));
+        }
+
+        return allFocus;
+    }
+
+    private void mergeFocusPointString(Map<String, Long> target, String focusPoints) {
+        if (focusPoints == null || focusPoints.isBlank()) {
+            return;
+        }
+        Arrays.stream(focusPoints.split(","))
+                .map(String::trim)
+                .filter(s -> !s.isEmpty())
+                .forEach(word -> target.merge(word, 1L, Long::sum));
+    }
+
+    private String formatDateKey(Object dateValue) {
+        if (dateValue == null) {
+            return "";
+        }
+        if (dateValue instanceof java.sql.Date sqlDate) {
+            return sqlDate.toLocalDate().format(DATE_FMT);
+        }
+        if (dateValue instanceof LocalDate localDate) {
+            return localDate.format(DATE_FMT);
+        }
+        if (dateValue instanceof LocalDateTime localDateTime) {
+            return localDateTime.toLocalDate().format(DATE_FMT);
+        }
+        return dateValue.toString();
     }
 }
