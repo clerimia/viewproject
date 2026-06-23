@@ -28,6 +28,21 @@ const uploadForm = reactive({ sourceId: '', title: '', category: '' })
 const ingestForm = reactive({ text: '', title: '', category: '', sourceId: '' })
 const uploadFile = ref<File | null>(null)
 const uploadMsg = ref('')
+const uploadTid = ref<ReturnType<typeof setTimeout> | null>(null)
+const ingestMsg = ref('')
+const ingestTid = ref<ReturnType<typeof setTimeout> | null>(null)
+
+function showMsg(msg: string) {
+  uploadMsg.value = msg
+  if (uploadTid.value) clearTimeout(uploadTid.value)
+  uploadTid.value = setTimeout(() => { uploadMsg.value = '' }, 5000)
+}
+
+function showIngestMsg(msg: string) {
+  ingestMsg.value = msg
+  if (ingestTid.value) clearTimeout(ingestTid.value)
+  ingestTid.value = setTimeout(() => { ingestMsg.value = '' }, 5000)
+}
 
 async function loadDocs() {
   docLoading.value = true
@@ -53,37 +68,45 @@ async function handleDeleteDoc(id: number) {
 
 async function handleUpload() {
   if (!uploadFile.value || !uploadForm.sourceId) {
-    uploadMsg.value = '请填写 Source ID 并选择文件'
+    showMsg('请填写 Source ID 并选择文件')
     return
   }
   try {
-    await uploadKnowledge(uploadFile.value, uploadForm.sourceId, uploadForm.title, uploadForm.category)
-    uploadMsg.value = '上传成功'
+    const res = await uploadKnowledge(uploadFile.value, uploadForm.sourceId, uploadForm.title, uploadForm.category)
+    if (!res.success) {
+      showMsg('上传失败: ' + (res.message || '未知错误'))
+      return
+    }
+    showMsg('✅ 上传成功')
     uploadFile.value = null
     uploadForm.sourceId = ''
     uploadForm.title = ''
     uploadForm.category = ''
     await loadDocs()
   } catch (e: any) {
-    uploadMsg.value = '上传失败: ' + (e.response?.data?.message || e.message)
+    showMsg('上传失败: ' + (e.response?.data?.message || e.message))
   }
 }
 
 async function handleIngest() {
   if (!ingestForm.text || !ingestForm.sourceId) {
-    uploadMsg.value = '请填写 Source ID 和文本内容'
+    showIngestMsg('请填写 Source ID 和文本内容')
     return
   }
   try {
-    await ingestText(ingestForm)
-    uploadMsg.value = '导入成功'
+    const res = await ingestText(ingestForm)
+    if (!res.success) {
+      showIngestMsg('导入失败: ' + (res.message || '未知错误'))
+      return
+    }
+    showIngestMsg('✅ 导入成功')
     ingestForm.text = ''
     ingestForm.sourceId = ''
     ingestForm.title = ''
     ingestForm.category = ''
     await loadDocs()
   } catch (e: any) {
-    uploadMsg.value = '导入失败: ' + (e.response?.data?.message || e.message)
+    showIngestMsg('导入失败: ' + (e.response?.data?.message || e.message))
   }
 }
 
@@ -417,9 +440,12 @@ onUnmounted(() => {
             <input v-model="ingestForm.category" placeholder="分类" class="px-3 py-2 border border-emerald-100 rounded-xl text-sm" />
           </div>
           <textarea v-model="ingestForm.text" rows="4" placeholder="粘贴知识文本..." class="w-full px-3 py-2 border border-emerald-100 rounded-xl text-sm"></textarea>
-          <button @click="handleIngest" class="px-4 py-2 bg-emerald-700 text-white rounded-xl text-sm hover:bg-emerald-800 transition">
-            导入
-          </button>
+          <div class="flex items-center gap-3">
+            <button @click="handleIngest" class="px-4 py-2 bg-emerald-700 text-white rounded-xl text-sm hover:bg-emerald-800 transition">
+              导入
+            </button>
+            <span v-if="ingestMsg" :class="ingestMsg.startsWith('✅') ? 'text-emerald-600' : 'text-red-600'" class="text-sm">{{ ingestMsg }}</span>
+          </div>
         </div>
 
         <!-- Document list -->
