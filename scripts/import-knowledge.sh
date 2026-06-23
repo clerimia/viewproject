@@ -31,22 +31,29 @@ echo "  文档目录: $DOCS_DIR"
 echo "============================================"
 echo ""
 
-# 遍历所有 .md 文件
-for file in "$DOCS_DIR"/*.md; do
+# 遍历所有 .md 和 .txt 文件
+for file in "$DOCS_DIR"/*.md "$DOCS_DIR"/*.txt; do
+    [ -f "$file" ] || continue
     filename=$(basename "$file")
 
-    # 提取第一行 # 作为标题
-    title=$(head -1 "$file" | sed 's/^# //' | xargs)
+    # 提取文档标题：优先取第一行 # 标题，否则取文件名
+    if head -1 "$file" | grep -q '^#'; then
+        title=$(head -1 "$file" | sed 's/^# //' | xargs)
+    elif head -1 "$file" | grep -q '^[A-Za-z一-龥]'; then
+        title=$(head -1 "$file" | sed 's/^# //' | sed 's/[[:space:]]*$//')
+    else
+        title=$(echo "$filename" | sed 's/\.\(md\|txt\)$//')
+    fi
 
     # 根据文件名关键词映射分类
     category="综合信息"
-    if echo "$filename" | grep -qi "history\|culture"; then
+    if echo "$filename" | grep -qi "history\|culture\|poetry"; then
         category="历史文化"
-    elif echo "$filename" | grep -qi "nature"; then
+    elif echo "$filename" | grep -qi "nature\|landscape\|season"; then
         category="自然风光"
-    elif echo "$filename" | grep -qi "food"; then
+    elif echo "$filename" | grep -qi "food\|souvenir"; then
         category="美食特产"
-    elif echo "$filename" | grep -qi "overview"; then
+    elif echo "$filename" | grep -qi "overview\|faq\|guide\|transportation\|test"; then
         category="综合信息"
     fi
 
@@ -56,7 +63,7 @@ for file in "$DOCS_DIR"/*.md; do
     echo -n "导入: $filename → 标题='$title', 分类='$category' ... "
 
     # 生成 sourceId（基于文件名）
-    sourceId=$(echo "$filename" | sed 's/\.md$//')
+    sourceId=$(echo "$filename" | sed 's/\.\(md\|txt\)$//')
 
     # 调用 RAG API
     response=$(curl -s -w "\n%{http_code}" \
