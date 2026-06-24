@@ -58,3 +58,10 @@ src/main/resources/static/*.json
 ### Logs ###
 *.log
 logs/
+
+### env ###
+.env
+
+### venv ###
+.venv/
+
